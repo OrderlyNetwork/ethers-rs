@@ -149,11 +149,14 @@ where
         if tx.nonce().is_none() {
             tx.set_nonce(self.get_transaction_count_with_manager(block).await?);
         }
+        let origin_nonce = tx.nonce().cloned().unwrap_or_else(|| U256::from(0));
+        let chain_id = tx.chain_id().clone().unwrap_or_else(|| U64::from(0));
 
         match self.inner.send_transaction(tx.clone(), block).await {
             Ok(tx_hash) => Ok(tx_hash),
             Err(err) => {
                 let nonce = self.get_transaction_count(self.address, block).await?;
+                tracing::error!("send_transaction failed with err: {}, chain_id: {}, origin nonce: {:?} and will replace nonce by: {:?}", err, chain_id, origin_nonce, nonce);
                 if nonce != self.nonce.load(Ordering::SeqCst).into() {
                     // try re-submitting the transaction with the correct nonce if there
                     // was a nonce mismatch
