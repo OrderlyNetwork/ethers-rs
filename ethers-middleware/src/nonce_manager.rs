@@ -153,7 +153,10 @@ where
         let chain_id = tx.chain_id().clone().unwrap_or_else(|| U64::from(0));
 
         match self.inner.send_transaction(tx.clone(), block).await {
-            Ok(tx_hash) => Ok(tx_hash),
+            Ok(tx_hash) => {
+                tracing::info!("send_transaction suss with nonce: {:?}, tx_hash: {:?}", origin_nonce, tx_hash.tx_hash());
+                Ok(tx_hash)
+            },
             Err(err) => {
                 let nonce = self.get_transaction_count(self.address, block).await?;
                 tracing::error!("send_transaction failed with err: {}, chain_id: {}, origin nonce: {:?} and will replace nonce by: {:?}", err, chain_id, origin_nonce, nonce);
