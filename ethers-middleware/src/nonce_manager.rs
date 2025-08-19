@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use ethers_core::types::{transaction::eip2718::TypedTransaction, *};
 use ethers_providers::{Middleware, MiddlewareError, PendingTransaction};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::{sync::atomic::{AtomicBool, AtomicU64, Ordering}, time::Duration};
 use thiserror::Error;
 
 #[derive(Debug)]
@@ -66,6 +66,7 @@ where
     } // guard dropped here
 
     pub fn reset_nonce(&self) {
+        tracing::warn!("reset nonce to sync nonce from node");
         self.initialized.store(false, Ordering::SeqCst);
     }
 
@@ -75,6 +76,12 @@ where
     ) -> Result<U256, NonceManagerError<M>> {
         // initialize the nonce the first time the manager is called
         if !self.initialized.load(Ordering::SeqCst) {
+            let _guard = self.init_guard.lock().await;
+            // do this again in case multiple tasks enter this codepath
+            if self.initialized.load(Ordering::SeqCst) {
+                // return current nonce
+                return Ok(self.next())
+            }
             let nonce = self
                 .inner
                 .get_transaction_count(self.address, block)
@@ -158,18 +165,19 @@ where
                 Ok(tx_hash)
             },
             Err(err) => {
-                let nonce = self.get_transaction_count(self.address, block).await?;
                 tracing::error!("send_transaction failed with err: {}, chain_id: {}, origin nonce: {:?} and will replace nonce by: {:?}", err, chain_id, origin_nonce, nonce);
-                if nonce != self.nonce.load(Ordering::SeqCst).into() {
+                // sleep a while to wait tx confirm
+                tokio::time::sleep(Duration::from_secs(8)).await;
+                let nonce = self.get_transaction_count(self.address, block).await?;
+                if nonce != origin_nonce {
                     // try re-submitting the transaction with the correct nonce if there
                     // was a nonce mismatch
-                    self.nonce.store(nonce.as_u64(), Ordering::SeqCst);
-                    tx.set_nonce(nonce);
-                    self.inner.send_transaction(tx, block).await.map_err(MiddlewareError::from_err)
-                } else {
-                    // propagate the error otherwise
-                    Err(MiddlewareError::from_err(err))
+                    self.reset_nonce();
+                    tx.set_nonce(self.get_transaction_count_with_manager(block).await?);
+                    return self.inner.send_transaction(tx, block).await.map_err(MiddlewareError::from_err);
                 }
+                // resend again
+                self.inner.send_transaction(tx, block).await.map_err(MiddlewareError::from_err)
             }
         }
     }
