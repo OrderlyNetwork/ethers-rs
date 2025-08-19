@@ -165,10 +165,10 @@ where
                 Ok(tx_hash)
             },
             Err(err) => {
-                tracing::error!("send_transaction failed with err: {}, chain_id: {}, origin nonce: {:?} and will replace nonce by: {:?}", err, chain_id, origin_nonce, nonce);
                 // sleep a while to wait tx confirm
                 tokio::time::sleep(Duration::from_secs(8)).await;
                 let nonce = self.get_transaction_count(self.address, block).await?;
+                tracing::error!("send_transaction failed with err: {}, chain_id: {}, origin nonce: {:?} and will replace nonce by: {:?}", err, chain_id, origin_nonce, nonce);
                 if nonce != origin_nonce {
                     // try re-submitting the transaction with the correct nonce if there
                     // was a nonce mismatch
