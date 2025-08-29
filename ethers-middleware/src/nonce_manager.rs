@@ -153,8 +153,11 @@ where
     ) -> Result<PendingTransaction<'_, Self::Provider>, Self::Error> {
         let mut tx = tx.into();
 
+        let mut try_reset_nonce = true;
         if tx.nonce().is_none() {
             tx.set_nonce(self.get_transaction_count_with_manager(block).await?);
+        } else {
+            try_reset_nonce = false;
         }
         let origin_nonce = tx.nonce().cloned().unwrap_or_else(|| U256::from(0));
         let chain_id = tx.chain_id().clone().unwrap_or_else(|| U64::from(0));
@@ -169,7 +172,7 @@ where
                 tokio::time::sleep(Duration::from_secs(8)).await;
                 let nonce = self.get_transaction_count(self.address, block).await?;
                 tracing::error!("send_transaction failed with err: {}, chain_id: {}, origin nonce: {:?} and will replace nonce by: {:?}", err, chain_id, origin_nonce, nonce);
-                if nonce != origin_nonce {
+                if nonce != origin_nonce && try_reset_nonce {
                     // try re-submitting the transaction with the correct nonce if there
                     // was a nonce mismatch
                     self.reset_nonce();
